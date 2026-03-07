@@ -1,336 +1,153 @@
-# ヘルプデスクエージェント デモシステム — 詳細設計書
+# AI Agent Demo Portfolio — 詳細設計書
 
-## 1. システムアーキテクチャ
-
-### 全体構成図
+## 1. 全体アーキテクチャ
 
 ```
-┌──────────────┐    ┌──────────────────────┐    ┌──────────────┐
-│ ユーザー画面   │    │   FastAPI バックエンド  │    │ オペレーター画面│
-│  (Next.js)   │    │                      │    │  (Next.js)   │
-│              │    │                      │    │              │
-│ フォーム送信 ──────> POST /api/inquiries   │    │              │
-│              │    │   |                  │    │              │
-│「受付しました」│<── job_id 返却          │    │ 新着通知      │
-│              │    │   |                  │    │              │
-│              │    │ Agent実行(SSE) ─────────> 進捗リアルタイム│
-│              │    │   |                  │    │ - 計画作成    │
-│              │    │   |                  │    │ - ツール選択  │
-│              │    │   |                  │    │ - 検索実行    │
-│              │    │   |                  │    │ - 回答生成    │
-│              │    │   |                  │    │ - リフレクション│
-│              │    │   |                  │    │ - リトライ    │
-│              │    │   v                  │    │              │
-│              │    │ 信頼度判定            │    │              │
-│              │    │   |                  │    │              │
-│              │    │   ├─ 高 → 自動承認    │    │              │
-│              │    │   ├─ 中 → 確認依頼 ────────> [承認/編集]  │
-│              │    │   └─ 低 → エスカレート │    │              │
-│              │    │   |                  │    │              │
-│              │    │ 承認時: QA 自動蓄積   │    │              │
-│ 回答が届く  <──── 回答送信              │    │              │
-└──────────────┘    └──────────────────────┘    └──────────────┘
-                         |          |
-                  ┌──────┘          └──────┐
-                  v                        v
-           ┌─────────────┐         ┌─────────────┐
-           │Elasticsearch │         │    Qdrant    │
-           │(キーワード検索)│         │(ベクトル検索) │
-           └─────────────┘         └──────┬──────┘
-                  |                       ^
-           ┌──────v──────┐                |
-           │   SQLite     │         フィードバック
-           │(問い合わせ管理)│         ループ
-           │(蓄積QAペア)  │─────────┘
-           └─────────────┘
-  承認された回答は QA ペアとして SQLite に保存され、
-  Qdrant にベクトル登録される（次回以降の類似検索に活用）
+┌─────────────────────────────────────────────────────────┐
+│                    Next.js Frontend                     │
+│                                                         │
+│  ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐  │
+│  │ Helpdesk│ │Data Anlys│ │Marketing │ │  Proposal  │  │
+│  │  Agent  │ │  Agent   │ │  Agent   │ │   Agent    │  │
+│  │  画面   │ │  画面    │ │  画面    │ │   画面     │  │
+│  └────┬────┘ └────┬─────┘ └────┬─────┘ └─────┬──────┘  │
+│       └───────────┴────────────┴──────────────┘         │
+│                         │ SSE                           │
+└─────────────────────────┼───────────────────────────────┘
+                          │
+┌─────────────────────────┼───────────────────────────────┐
+│                  FastAPI Backend                        │
+│                         │                               │
+│  ┌──────────────────────┴──────────────────────────┐    │
+│  │              /api/{agent_type}/...               │    │
+│  └──────────────────────┬──────────────────────────┘    │
+│                         │                               │
+│  ┌──────────┐ ┌─────────┴──┐ ┌──────────┐ ┌─────────┐  │
+│  │ Helpdesk │ │Data Anlys  │ │Marketing │ │Proposal │  │
+│  │  Agent   │ │  Agent     │ │  Agent   │ │ Agent   │  │
+│  │(LangGraph│ │(LangGraph) │ │(LangGraph│ │(LangGr.)│  │
+│  └────┬─────┘ └─────┬─────┘ └────┬─────┘ └────┬────┘  │
+│       │              │            │             │       │
+│  ┌────┴────┐    ┌────┴────┐   (LLM only)  ┌────┴────┐  │
+│  │ES+Qdrant│    │E2B Sbox │               │Web Search│  │
+│  └─────────┘    └─────────┘               └─────────┘  │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │              SQLite (共通 DB)                    │    │
+│  └─────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### 技術スタック
+## 2. 技術スタック
 
 | レイヤー | 技術 | 理由 |
 |---|---|---|
-| フロントエンド | Next.js 15 (App Router) | SSR + SSE 対応。React エコシステム |
-| UIライブラリ | shadcn/ui + Tailwind CSS | 高品質なUI を素早く構築 |
-| バックエンド | FastAPI | 非同期対応、SSE との相性、型安全 |
-| エージェント | LangGraph + OpenAI API | サイクルグラフによるリフレクション・リトライ |
-| 全文検索 | Elasticsearch + kuromoji | 日本語マニュアル検索 |
-| ベクトル検索 | Qdrant | 過去QA の類似検索 |
-| DB | SQLite (aiosqlite) | デモ用途に十分。セットアップ不要 |
-| リバースプロキシ | Caddy | Let's Encrypt 自動HTTPS |
-| コンテナ | Docker Compose | ワンコマンドで全サービス起動 |
+| フロントエンド | Next.js 15 (App Router) | SSR + SSE 対応 |
+| UI | shadcn/ui + Tailwind CSS | 高品質な UI を素早く構築 |
+| バックエンド | FastAPI | 非同期対応、SSE との相性 |
+| エージェント | LangGraph + OpenAI API | サイクルグラフ、マルチエージェント |
+| 全文検索 | Elasticsearch + kuromoji | 問い合わせエージェント用 |
+| ベクトル検索 | Qdrant | 問い合わせエージェント用 |
+| コード実行 | E2B Sandbox | データ分析エージェント用 |
+| Web 検索 | Tavily API | 提案資料エージェント用 |
+| DB | SQLite (aiosqlite) | 全エージェント共通 |
+| コンテナ | Docker Compose | ワンコマンド起動 |
+| リバースプロキシ | Caddy | 自動 HTTPS（本番） |
 
----
+## 3. API 設計（共通パターン）
 
-## 2. LangGraph エージェント設計
-
-### 2.1 グラフ構造
-
-```
-                    ┌─────────┐
-                    │ planner │  質問をサブタスクに分解
-                    └────┬────┘
-                         v
-                ┌────────────────┐
-            ┌──>│ tool_selector  │  サブタスクに最適なツールを選択
-            │   └───────┬────────┘
-            │           v
-            │   ┌───────────────┐
-            │   │   searcher    │  ES or Qdrant で検索実行
-            │   └───────┬───────┘
-            │           v
-            │   ┌───────────────┐
-            │   │   answerer    │  検索結果をもとに回答生成
-            │   └───────┬───────┘
-            │           v
-            │   ┌───────────────┐
-  リトライ   │   │  reflector    │  回答品質を自己評価
-  (最大3回)  │   └───────┬───────┘
-            │           |
-            │     ┌─────┴─────┐
-            │     │           │
-            │  不十分        十分
-            │     │           │
-            └─────┘           v
-                      ┌─────────────┐
-                      │ integrator  │  サブタスク結果を統合 → 最終回答
-                      └─────────────┘
-```
-
-### 2.2 各ノードの責務
-
-| ノード | 入力 | 出力 | 説明 |
-|---|---|---|---|
-| `planner` | 質問文 | サブタスク一覧 | 質問を独立したサブタスクに分解 |
-| `tool_selector` | サブタスク | ツール名 + 検索クエリ | 質問の性質に応じて検索戦略を選択 |
-| `searcher` | ツール名 + クエリ | 検索結果 | ES キーワード検索 or Qdrant ベクトル検索を実行 |
-| `answerer` | 検索結果 + サブタスク | 回答テキスト | 検索結果からサブタスクの回答を生成 |
-| `reflector` | 回答 + 検索結果 | 評価結果 (十分/不十分) | 回答の正確性・網羅性を自己評価。不十分なら別クエリでリトライ |
-| `integrator` | 全サブタスクの回答 | 最終回答ドラフト | サブタスク結果を統合し、一貫した最終回答を生成 |
-
-### 2.3 適応的検索戦略
-
-`tool_selector` が質問の性質に応じてツールを動的に選択する。
-
-| 質問の性質 | 選択されるツール | 理由 |
-|---|---|---|
-| 具体的な用語を含む（「パスワード 文字数」） | `search_xyz_manual` (ES) | キーワード一致が有効 |
-| 曖昧・自然言語的（「ログインできない」） | `search_xyz_qa` (Qdrant) | 意味的類似度が有効 |
-| 1回目で不十分 | 別ツールに切り替えてリトライ | 相互補完 |
-
-### 2.4 リフレクションの判定基準
-
-```python
-def reflect(answer: str, search_results: list, subtask: str) -> ReflectionResult:
-    """
-    以下の観点で回答を評価:
-    1. 検索結果に根拠があるか（ハルシネーション防止）
-    2. サブタスクの質問に過不足なく答えているか
-    3. 情報が具体的か（「〜の可能性があります」のような曖昧表現がないか）
-    """
-```
-
----
-
-## 3. API 設計
-
-### エンドポイント一覧
-
-| メソッド | パス | 説明 |
-|---|---|---|
-| `POST` | `/api/inquiries` | 問い合わせを受付し、エージェント処理を開始 |
-| `GET` | `/api/inquiries` | 問い合わせ一覧を取得（オペレーター用） |
-| `GET` | `/api/inquiries/{id}` | 問い合わせ詳細を取得 |
-| `GET` | `/api/inquiries/{id}/stream` | SSE でエージェント処理の進捗をストリーム |
-| `PATCH` | `/api/inquiries/{id}` | 回答の編集・ステータス変更（承認/却下） |
-| `GET` | `/api/health` | ヘルスチェック |
-
-### リクエスト/レスポンス定義
-
-```python
-# POST /api/inquiries
-# Request
-{
-    "question": "パスワードの文字制限について教えてください",
-    "user_name": "田中太郎"           # optional
-}
-
-# Response (202 Accepted)
-{
-    "id": "inq_abc123",
-    "status": "processing",
-    "created_at": "2026-03-07T18:39:00Z"
-}
-```
-
-```python
-# GET /api/inquiries/{id}/stream (SSE)
-# イベントストリーム — エージェントの各ノード実行をリアルタイム配信
-
-# 計画フェーズ
-data: {"step": "plan", "subtasks": ["パスワード文字制限の調査", "通知制限の調査"]}
-
-# サブタスク1: 1回で成功
-data: {"step": "subtask", "index": 0, "status": "tool_selection", "tool": "search_xyz_manual", "reason": "具体的なキーワードを含むため ES 検索を選択"}
-data: {"step": "subtask", "index": 0, "status": "searching", "query": "パスワード 文字制限"}
-data: {"step": "subtask", "index": 0, "status": "answering"}
-data: {"step": "subtask", "index": 0, "status": "reflecting", "is_completed": true, "confidence": 1.0}
-
-# サブタスク2: リトライ発生
-data: {"step": "subtask", "index": 1, "status": "tool_selection", "tool": "search_xyz_qa", "reason": "曖昧な質問のため Qdrant を選択"}
-data: {"step": "subtask", "index": 1, "status": "searching", "query": "通知の設定制限"}
-data: {"step": "subtask", "index": 1, "status": "answering"}
-data: {"step": "subtask", "index": 1, "status": "reflecting", "is_completed": false, "reason": "検索結果に十分な情報がない"}
-data: {"step": "subtask", "index": 1, "status": "retrying", "attempt": 2, "tool": "search_xyz_manual", "reason": "ES 検索に切り替え"}
-data: {"step": "subtask", "index": 1, "status": "searching", "query": "通知 設定 上限"}
-data: {"step": "subtask", "index": 1, "status": "answering"}
-data: {"step": "subtask", "index": 1, "status": "reflecting", "is_completed": true, "confidence": 0.6}
-
-# 統合・完了
-data: {"step": "integrating"}
-data: {"step": "done", "draft_answer": "お世話になっております...", "confidence": 0.8}
-```
-
-```python
-# PATCH /api/inquiries/{id}
-# Request (承認)
-{
-    "status": "approved",
-    "final_answer": "お世話になっております..."  # 編集後の回答
-}
-
-# Request (却下)
-{
-    "status": "rejected"
-}
-```
-
-```python
-# GET /api/inquiries
-# Response
-{
-    "inquiries": [
-        {
-            "id": "inq_abc123",
-            "question": "パスワードの文字制限...",
-            "status": "draft",        # pending / processing / draft / auto_approved / approved / rejected / escalated
-            "confidence": 0.8,
-            "created_at": "2026-03-07T18:39:00Z"
-        }
-    ]
-}
-```
-
----
-
-## 4. データベース設計
-
-### テーブル定義 (SQLite)
-
-```sql
-CREATE TABLE inquiries (
-    id TEXT PRIMARY KEY,              -- "inq_" + UUID
-    question TEXT NOT NULL,           -- 問い合わせ内容
-    user_name TEXT DEFAULT '匿名',    -- ユーザー名
-    status TEXT DEFAULT 'pending',    -- pending / processing / draft / auto_approved / approved / rejected / escalated
-    draft_answer TEXT,                -- エージェント生成の回答ドラフト
-    final_answer TEXT,                -- オペレーター承認後の最終回答
-    confidence REAL,                  -- 信頼度 (0.0 - 1.0)
-    plan JSON,                        -- 計画（サブタスク一覧）
-    agent_result JSON,               -- AgentResult をまるごと保存
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    answered_at TIMESTAMP            -- 回答送信日時
-);
-
--- フィードバックループ: 承認された回答を QA ペアとして蓄積
-CREATE TABLE qa_pairs (
-    id TEXT PRIMARY KEY,              -- "qa_" + UUID
-    question TEXT NOT NULL,           -- 元の問い合わせ
-    answer TEXT NOT NULL,             -- 承認された最終回答
-    source TEXT DEFAULT 'agent_approved',  -- 'agent_approved' / 'manual'
-    inquiry_id TEXT,                  -- 元の問い合わせID
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (inquiry_id) REFERENCES inquiries(id)
-);
-```
-
-### ステータス遷移
+各エージェントは統一的な API パターンに従う:
 
 ```
-                          ┌─ 信頼度 >= 0.9 → auto_approved → (回答送信 + QA蓄積)
-pending → processing → draft
-                          ├─ 信頼度 0.5〜0.89 → オペレーター確認
-                          │    ├─ approved → (回答送信 + QA蓄積)
-                          │    └─ rejected
-                          │
-                          └─ 信頼度 < 0.5 → escalated → (上位担当者へ通知)
+POST   /api/{agent_type}/sessions          セッション作成 + 処理開始
+GET    /api/{agent_type}/sessions/{id}      セッション詳細取得
+GET    /api/{agent_type}/sessions/{id}/stream  SSE ストリーム
+POST   /api/{agent_type}/sessions/{id}/messages  追加メッセージ送信（会話型）
 ```
 
-### フィードバックループ
+### エージェント別の追加エンドポイント
 
-承認時（`approved` / `auto_approved`）に自動実行:
-1. `qa_pairs` テーブルに質問+最終回答を保存
-2. Qdrant にベクトル登録
-3. 次回以降の類似質問検索で参照される
+| エージェント | 追加 API |
+|---|---|
+| helpdesk | `GET /api/helpdesk/inquiries` (オペレーター一覧), `PATCH /api/helpdesk/inquiries/{id}` (承認/却下) |
+| data-analysis | `POST /api/data-analysis/upload` (CSV アップロード) |
+| marketing | なし（会話型のみ） |
+| proposal | なし（標準パターンで完結） |
 
-```python
-# PATCH /api/inquiries/{id} で承認時
-if status in ("approved", "auto_approved"):
-    await qa_repo.create(
-        question=inquiry.question,
-        answer=final_answer,
-        source="agent_approved",
-        inquiry_id=inquiry.id,
-    )
-    await qdrant_client.upsert(
-        collection_name="qa_pairs",
-        points=[PointStruct(id=qa_id, vector=embed(question + answer), payload={...})],
-    )
-```
-
----
-
-## 5. ディレクトリ構成
+## 4. ディレクトリ構成
 
 ```
 helpdesk-agent-demo/
-├── docker-compose.yml              # ローカル開発用
-├── docker-compose.prod.yml         # 本番デプロイ用
-├── Caddyfile                       # リバースプロキシ設定
-├── .env.example                    # 環境変数テンプレート
-├── README.md                       # ポートフォリオ説明
+├── docker-compose.yml
+├── docker-compose.prod.yml
+├── Caddyfile
+├── .env.example
 │
 ├── backend/
 │   ├── Dockerfile
 │   ├── pyproject.toml
 │   │
 │   ├── api/
-│   │   ├── main.py                 # FastAPI アプリケーション
-│   │   ├── schemas.py              # リクエスト/レスポンス定義
-│   │   ├── dependencies.py         # DI（Settings, Agent の初期化）
+│   │   ├── main.py                     # FastAPI アプリ
+│   │   ├── dependencies.py             # 共通 DI
 │   │   └── routes/
-│   │       ├── inquiries.py        # 問い合わせ CRUD + SSE
-│   │       └── health.py           # ヘルスチェック
+│   │       ├── health.py
+│   │       ├── helpdesk.py             # 問い合わせ API
+│   │       ├── data_analysis.py        # データ分析 API
+│   │       ├── marketing.py            # マーケティング API
+│   │       └── proposal.py             # 提案資料 API
 │   │
-│   ├── src/
-│   │   ├── agent.py                # HelpDeskAgent (LangGraph)
-│   │   ├── configs.py              # Settings
-│   │   ├── models.py               # Pydantic モデル
-│   │   ├── prompts.py              # プロンプト定義
-│   │   ├── custom_logger.py        # ロガー
-│   │   └── tools/
-│   │       ├── search_xyz_manual.py  # ES キーワード検索
-│   │       └── search_xyz_qa.py      # Qdrant ベクトル検索
+│   ├── agents/
+│   │   ├── helpdesk/
+│   │   │   ├── agent.py                # LangGraph グラフ
+│   │   │   ├── prompts.py              # プロンプト
+│   │   │   ├── models.py               # State 定義
+│   │   │   └── tools/
+│   │   │       ├── search_manual.py    # ES 検索
+│   │   │       └── search_qa.py        # Qdrant 検索
+│   │   │
+│   │   ├── data_analysis/
+│   │   │   ├── agent.py                # LangGraph グラフ
+│   │   │   ├── prompts.py
+│   │   │   ├── models.py
+│   │   │   └── nodes/
+│   │   │       ├── generate_code.py
+│   │   │       ├── execute_code.py
+│   │   │       └── generate_review.py
+│   │   │
+│   │   ├── marketing/
+│   │   │   ├── agent.py                # マルチエージェント
+│   │   │   ├── prompts.py
+│   │   │   ├── models.py
+│   │   │   └── sub_agents/
+│   │   │       ├── router.py
+│   │   │       ├── question.py
+│   │   │       └── recommendation.py
+│   │   │
+│   │   └── proposal/
+│   │       ├── agent.py                # Multi-chain
+│   │       ├── prompts.py
+│   │       ├── models.py
+│   │       └── chains/
+│   │           ├── hearing.py
+│   │           ├── search.py
+│   │           ├── evaluate.py
+│   │           └── report.py
+│   │
+│   ├── common/
+│   │   ├── configs.py                  # Settings
+│   │   ├── logger.py                   # ロガー
+│   │   ├── schemas.py                  # 共通スキーマ
+│   │   └── streaming.py               # SSE ヘルパー
 │   │
 │   ├── db/
-│   │   ├── database.py             # SQLite 接続管理
-│   │   └── repository.py           # CRUD 操作 (inquiries + qa_pairs)
+│   │   ├── database.py
+│   │   └── repository.py
 │   │
 │   ├── scripts/
-│   │   └── create_index.py         # 初期データ投入スクリプト
+│   │   └── create_index.py
 │   │
-│   └── data/                       # マニュアルPDF・QA CSV
+│   └── data/
 │       ├── manual/
 │       └── qa/
 │
@@ -339,170 +156,251 @@ helpdesk-agent-demo/
 │   ├── package.json
 │   │
 │   └── app/
-│       ├── layout.tsx              # 共通レイアウト
+│       ├── layout.tsx
+│       ├── page.tsx                    # ポータル（エージェント選択）
 │       │
-│       ├── user/
-│       │   └── page.tsx            # ユーザー問い合わせフォーム
+│       ├── helpdesk/
+│       │   ├── page.tsx               # ユーザーフォーム
+│       │   └── operator/
+│       │       └── page.tsx           # オペレーターダッシュボード
 │       │
-│       ├── operator/
-│       │   ├── page.tsx            # オペレーターダッシュボード
-│       │   └── [id]/
-│       │       └── page.tsx        # 問い合わせ詳細
+│       ├── data-analysis/
+│       │   └── page.tsx               # CSV アップロード + 分析結果
+│       │
+│       ├── marketing/
+│       │   └── page.tsx               # チャット形式の対話画面
+│       │
+│       ├── proposal/
+│       │   └── page.tsx               # テーマ入力 + レポート表示
 │       │
 │       └── components/
-│           ├── InquiryForm.tsx     # 問い合わせフォーム
-│           ├── InquiryResult.tsx   # 受付完了 + 回答表示
-│           ├── AgentProgress.tsx   # エージェント進捗表示 (SSE 受信)
-│           ├── DraftEditor.tsx     # 回答ドラフト編集
-│           ├── InquiryList.tsx     # 問い合わせ一覧
-│           └── ConfidenceBadge.tsx # 信頼度バッジ
+│           ├── AgentCard.tsx           # ポータルのエージェント選択カード
+│           ├── AgentProgress.tsx       # 共通: エージェント進捗表示
+│           ├── StreamViewer.tsx        # 共通: SSE ストリーム表示
+│           ├── helpdesk/
+│           │   ├── InquiryForm.tsx
+│           │   ├── InquiryResult.tsx
+│           │   ├── InquiryList.tsx
+│           │   ├── DraftEditor.tsx
+│           │   └── ConfidenceBadge.tsx
+│           ├── data-analysis/
+│           │   ├── FileUploader.tsx
+│           │   ├── AnalysisPlan.tsx
+│           │   └── ReportViewer.tsx
+│           ├── marketing/
+│           │   ├── ChatInterface.tsx
+│           │   └── RecommendationCard.tsx
+│           └── proposal/
+│               ├── ThemeInput.tsx
+│               └── ReportViewer.tsx
 │
 └── .docker/
-    └── Dockerfile                  # Elasticsearch (kuromoji 入り)
+    └── Dockerfile                     # ES + kuromoji
 ```
 
----
+## 5. 共通パターン
 
-## 6. 主要コンポーネントの実装方針
+### 5.1 SSE イベントコントラクト
 
-### 6.1 SSE によるリアルタイム進捗配信
+全エージェントで統一された SSE イベント形式を使用する。
 
-```python
-# backend/api/routes/inquiries.py
+#### イベント種別
 
-from sse_starlette.sse import EventSourceResponse
+| event 名 | 発火タイミング | data の内容 |
+|---|---|---|
+| `session_start` | セッション開始時 | `{ session_id, agent_type }` |
+| `node_start` | LangGraph ノード実行開始 | `{ node, message? }` |
+| `node_complete` | ノード実行完了 | `{ node, output }` |
+| `error` | 回復可能なエラー発生 | `{ code, message, node?, retry_count? }` |
+| `done` | 全処理完了 | `{ session_id, status, result }` |
 
-@router.get("/inquiries/{inquiry_id}/stream")
-async def stream_inquiry(inquiry_id: str):
-    return EventSourceResponse(agent_event_generator(inquiry_id))
+#### イベントデータ共通フォーマット
 
-async def agent_event_generator(inquiry_id: str):
-    inquiry = await inquiry_repo.get(inquiry_id)
-    agent = HelpDeskAgent(settings=settings, tools=[...])
-    app = agent.create_graph()
+```
+event: <event_name>
+data: {"timestamp": "2026-03-08T12:00:00Z", ...イベント固有フィールド}
 
-    for event in app.stream({"question": inquiry.question, "current_step": 0}):
-        for node_name, output in event.items():
-            yield {
-                "event": node_name,
-                "data": json.dumps(format_event(node_name, output), ensure_ascii=False)
-            }
-
-    # エージェント完了後、信頼度に基づいてルーティング
-    confidence = calc_confidence(result.subtasks)
-    await inquiry_repo.update_draft(inquiry_id, result.last_answer, confidence)
-
-    if confidence >= 0.9:
-        await auto_approve(inquiry_id, result.last_answer)
-        yield {"event": "auto_approved", "data": json.dumps({"confidence": confidence})}
-    elif confidence < 0.5:
-        await escalate(inquiry_id)
-        yield {"event": "escalated", "data": json.dumps({"confidence": confidence})}
-    else:
-        yield {"event": "done", "data": json.dumps({"confidence": confidence})}
 ```
 
-### 6.2 信頼度の算出
+#### エージェント固有の node 名
 
-```python
-def calc_confidence(subtasks: list[Subtask]) -> float:
-    """リフレクション結果から信頼度を算出する"""
-    scores = []
-    for subtask in subtasks:
-        if subtask.is_completed and subtask.challenge_count == 1:
-            scores.append(1.0)   # 1回で解決 -> 高信頼
-        elif subtask.is_completed:
-            scores.append(0.6)   # リトライで解決 -> 中信頼
-        else:
-            scores.append(0.0)   # 未解決
-    return sum(scores) / len(scores) if scores else 0.0
+| エージェント | node 名の例 |
+|---|---|
+| helpdesk | `planner`, `tool_selector`, `searcher`, `answerer`, `reflector`, `integrator` |
+| data-analysis | `generate_plan`, `approve_plan`, `generate_code`, `execute_code`, `review`, `generate_report` |
+| marketing | `router`, `question_agent`, `recommendation_agent` |
+| proposal | `hearing`, `goal_setting`, `decompose_query`, `search`, `evaluate`, `generate_report` |
+
+#### SSE ストリーム例
+
+```
+event: session_start
+data: {"timestamp": "2026-03-08T12:00:00Z", "session_id": "sess_abc123", "agent_type": "helpdesk"}
+
+event: node_start
+data: {"timestamp": "2026-03-08T12:00:01Z", "node": "planner", "message": "質問をサブタスクに分解中"}
+
+event: node_complete
+data: {"timestamp": "2026-03-08T12:00:03Z", "node": "planner", "output": {"subtasks": ["パスワード文字制限の調査", "通知制限の調査"]}}
+
+event: node_start
+data: {"timestamp": "2026-03-08T12:00:03Z", "node": "searcher", "message": "ES 検索を実行中"}
+
+event: error
+data: {"timestamp": "2026-03-08T12:00:04Z", "code": "SEARCH_TIMEOUT", "message": "Elasticsearch がタイムアウトしました。リトライします", "node": "searcher", "retry_count": 1}
+
+event: node_complete
+data: {"timestamp": "2026-03-08T12:00:06Z", "node": "searcher", "output": {"results_count": 3}}
+
+event: done
+data: {"timestamp": "2026-03-08T12:00:15Z", "session_id": "sess_abc123", "status": "completed", "result": {"confidence": 0.85}}
 ```
 
-### 6.3 フロントエンドの SSE 受信
+#### フロントエンド受信パターン
 
 ```typescript
-// frontend/app/components/AgentProgress.tsx
-
-function useAgentStream(inquiryId: string) {
+// frontend/app/hooks/useAgentStream.ts
+function useAgentStream(agentType: string, sessionId: string) {
     const [steps, setSteps] = useState<AgentStep[]>([]);
+    const [error, setError] = useState<AgentError | null>(null);
+    const [status, setStatus] = useState<"connecting" | "streaming" | "done" | "error">("connecting");
 
     useEffect(() => {
         const source = new EventSource(
-            `${API_URL}/api/inquiries/${inquiryId}/stream`
+            `${API_URL}/api/${agentType}/sessions/${sessionId}/stream`
         );
-        source.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            setSteps((prev) => [...prev, data]);
-        };
-        source.addEventListener("done", () => source.close());
-        source.addEventListener("auto_approved", () => source.close());
-        source.addEventListener("escalated", () => source.close());
-        return () => source.close();
-    }, [inquiryId]);
+        source.onopen = () => setStatus("streaming");
 
-    return steps;
+        source.addEventListener("node_start", (e) => {
+            setSteps((prev) => [...prev, { ...JSON.parse(e.data), phase: "running" }]);
+        });
+        source.addEventListener("node_complete", (e) => {
+            setSteps((prev) => updateLastStep(prev, JSON.parse(e.data)));
+        });
+        source.addEventListener("error", (e) => {
+            if (e.data) setError(JSON.parse(e.data));    // サーバー送信のエラーイベント
+            else setStatus("error");                       // 接続エラー
+        });
+        source.addEventListener("done", (e) => {
+            setStatus("done");
+            source.close();
+        });
+        return () => source.close();
+    }, [agentType, sessionId]);
+
+    return { steps, error, status };
 }
 ```
 
-### 6.4 OpenAI API コスト対策
+### 5.2 エラーハンドリング
+
+#### エラーレスポンス共通フォーマット（REST API）
 
 ```python
-DAILY_LIMIT = 50
-
-@router.post("/inquiries", status_code=202)
-async def create_inquiry(request: AskRequest):
-    today_count = await inquiry_repo.count_today()
-    if today_count >= DAILY_LIMIT:
-        raise HTTPException(
-            status_code=429,
-            detail="本日の利用上限に達しました。明日以降にお試しください。"
-        )
-    ...
-```
-
----
-
-## 7. デプロイ構成
-
-### ホスティング先
-
-**Hetzner Cloud CAX21** (ARM / 4vCPU / 8GB RAM / 80GB SSD)
-- 月額: 約 7 EUR (約 1,100 円)
-- リージョン: ヨーロッパ (デモ用途なのでレイテンシは許容)
-
-### Caddyfile
-
-```
-helpdesk-demo.example.com {
-    handle /api/* {
-        reverse_proxy backend:8000
-    }
-    handle {
-        reverse_proxy frontend:3000
+# 全 API エンドポイント共通
+{
+    "error": {
+        "code": "RATE_LIMIT_EXCEEDED",       # マシンリーダブルなエラーコード
+        "message": "本日の利用上限に達しました", # ユーザー向けメッセージ
+        "details": {}                          # 追加情報（任意）
     }
 }
 ```
 
-### デプロイ手順
+#### エラーコード一覧
 
-```bash
-# 1. VPS にSSH接続
-ssh root@<server-ip>
+| コード | HTTP Status | 説明 |
+|---|---|---|
+| `VALIDATION_ERROR` | 400 | リクエストバリデーション失敗 |
+| `SESSION_NOT_FOUND` | 404 | 指定セッションが存在しない |
+| `RATE_LIMIT_EXCEEDED` | 429 | 日次利用上限（daily_limit）超過 |
+| `LLM_ERROR` | 502 | OpenAI API の呼び出し失敗 |
+| `SEARCH_ERROR` | 502 | Elasticsearch / Qdrant の障害 |
+| `SANDBOX_ERROR` | 502 | E2B サンドボックス実行失敗 |
+| `WEB_SEARCH_ERROR` | 502 | Tavily API の障害 |
+| `INTERNAL_ERROR` | 500 | 予期しない内部エラー |
 
-# 2. Docker インストール
-curl -fsSL https://get.docker.com | sh
+#### 外部サービス障害時の振る舞い
 
-# 3. リポジトリをクローン
-git clone https://github.com/<username>/helpdesk-agent-demo.git
-cd helpdesk-agent-demo
+| サービス | タイムアウト | リトライ | フォールバック |
+|---|---|---|---|
+| OpenAI API | 60 秒 | 最大 2 回（指数バックオフ: 1s → 2s） | なし。SSE で `error` イベント送信後 `done(status=failed)` |
+| Elasticsearch | 10 秒 | 最大 2 回 | Qdrant のみで検索続行（helpdesk） |
+| Qdrant | 10 秒 | 最大 2 回 | ES のみで検索続行（helpdesk） |
+| E2B Sandbox | 30 秒 | 最大 1 回 | なし。エラーを分析結果に含めてレポート生成 |
+| Tavily API | 15 秒 | 最大 2 回 | LLM の内部知識のみで回答し、情報源なしと明記 |
 
-# 4. 環境変数を設定
-cp .env.example .env
-vi .env  # OPENAI_API_KEY 等を設定
+#### SSE ストリーム中のエラー処理フロー
 
-# 5. 起動
-docker compose -f docker-compose.prod.yml up -d
+```
+ノード実行中にエラー発生
+    │
+    ├─ リトライ可能？
+    │   ├─ YES → error イベント送信（retry_count 付き）→ リトライ実行
+    │   │         └─ リトライ成功 → node_complete → 次ノードへ
+    │   │         └─ リトライ上限 → 致命的エラーへ
+    │   │
+    │   └─ NO（バリデーション等）→ 致命的エラーへ
+    │
+    └─ 致命的エラー
+        → error イベント送信
+        → done イベント送信（status: "failed"）
+        → DB の session.status を "failed" に更新
+        → SSE 接続クローズ
+```
 
-# 6. インデックス作成（初回のみ）
-docker compose exec backend python -m scripts.create_index
+#### レート制限
+
+```python
+# 全エージェント共通
+@router.post("/sessions", status_code=202)
+async def create_session(request: Request, settings: Settings = Depends(get_settings)):
+    today_count = await session_repo.count_today()
+    if today_count >= settings.daily_limit:
+        raise AppError(
+            code="RATE_LIMIT_EXCEEDED",
+            message="本日の利用上限に達しました。明日以降にお試しください。",
+            status_code=429,
+        )
+```
+
+### 5.3 Settings
+
+```python
+# backend/common/configs.py
+class Settings(BaseSettings):
+    openai_api_key: str
+    openai_model: str = "gpt-4o"
+    elasticsearch_url: str = "http://elasticsearch:9200"
+    qdrant_url: str = "http://qdrant:6333"
+    e2b_api_key: str = ""
+    tavily_api_key: str = ""
+    database_url: str = "sqlite+aiosqlite:///./demo.db"
+    daily_limit: int = 50
+```
+
+## 6. エージェント別アーキテクチャ概要
+
+### 問い合わせ対応 (Chapter 4 パターン)
+
+```
+planner → [tool_selector → searcher → answerer → reflector]×N → integrator
+```
+
+### データ分析 (Chapter 5 パターン)
+
+```
+generate_plan → approve_plan → [generate_code → execute_code → review]×N → generate_report
+```
+
+### マーケティング支援 (Chapter 7 MACRS パターン)
+
+```
+router → question_agent / recommendation_agent / chitchat_agent → router (ループ)
+```
+
+### 提案資料作成 (Chapter 6 パターン)
+
+```
+hearing → goal_setting → decompose_query → search → evaluate → generate_report
 ```
