@@ -96,9 +96,8 @@ export function useAgentStream(): UseAgentStreamReturn {
     };
 
     const onError = (e: Event) => {
-      const messageEvent = e as MessageEvent;
-      if (messageEvent.data) {
-        const data = safeParse(messageEvent.data);
+      if (e instanceof MessageEvent && e.data) {
+        const data = safeParse(e.data);
         if (data) {
           setError(data as unknown as AgentError);
           pushEvent("error", data);
