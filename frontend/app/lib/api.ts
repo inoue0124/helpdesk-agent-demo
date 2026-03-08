@@ -6,7 +6,7 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 
-class ApiClientError extends Error {
+export class ApiClientError extends Error {
   constructor(
     public readonly code: string,
     message: string,
@@ -32,27 +32,38 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    throw new ApiClientError(
+      "NETWORK_ERROR",
+      e instanceof Error ? e.message : "ネットワークエラーが発生しました",
+      0,
+    );
+  }
+  return handleResponse<T>(res);
+}
+
 export const api = {
   async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${API_URL}${path}`);
-    return handleResponse<T>(res);
+    return request<T>(`${API_URL}${path}`);
   },
 
   async post<T>(path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${API_URL}${path}`, {
+    return request<T>(`${API_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return handleResponse<T>(res);
   },
 
   async patch<T>(path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${API_URL}${path}`, {
+    return request<T>(`${API_URL}${path}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return handleResponse<T>(res);
   },
 };

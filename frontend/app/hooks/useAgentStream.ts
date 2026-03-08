@@ -23,6 +23,14 @@ interface UseAgentStreamReturn {
   connect: (agentType: string, sessionId: string) => void;
 }
 
+function safeParse(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function updateLastStep(prev: AgentStep[], data: { node: string; output?: unknown }, phase: StepPhase): AgentStep[] {
   const idx = prev.findLastIndex((s) => s.node === data.node);
   if (idx === -1) return prev;
@@ -38,6 +46,7 @@ export function useAgentStream(): UseAgentStreamReturn {
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   const pushEvent = useCallback((event: string, data: Record<string, unknown>) => {
     setEvents((prev) => [
@@ -46,8 +55,14 @@ export function useAgentStream(): UseAgentStreamReturn {
     ]);
   }, []);
 
+  const closeSource = useCallback(() => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    sourceRef.current = null;
+  }, []);
+
   const connect = useCallback((agentType: string, sessionId: string) => {
-    sourceRef.current?.close();
+    closeSource();
     setSteps([]);
     setEvents([]);
     setError(null);
@@ -59,50 +74,74 @@ export function useAgentStream(): UseAgentStreamReturn {
     );
     sourceRef.current = source;
 
-    source.onopen = () => setStatus("streaming");
+    const onOpen = () => setStatus("streaming");
 
-    source.addEventListener("session_start", (e) => {
-      const data = JSON.parse(e.data);
-      pushEvent("session_start", data);
-    });
+    const onSessionStart = (e: MessageEvent) => {
+      const data = safeParse(e.data);
+      if (data) pushEvent("session_start", data);
+    };
 
-    source.addEventListener("node_start", (e) => {
-      const data = JSON.parse(e.data);
-      setSteps((prev) => [...prev, { node: data.node, phase: "running", message: data.message }]);
+    const onNodeStart = (e: MessageEvent) => {
+      const data = safeParse(e.data);
+      if (!data) return;
+      setSteps((prev) => [...prev, { node: data.node as string, phase: "running", message: data.message as string | undefined }]);
       pushEvent("node_start", data);
-    });
+    };
 
-    source.addEventListener("node_complete", (e) => {
-      const data = JSON.parse(e.data);
-      setSteps((prev) => updateLastStep(prev, data, "completed"));
+    const onNodeComplete = (e: MessageEvent) => {
+      const data = safeParse(e.data);
+      if (!data) return;
+      setSteps((prev) => updateLastStep(prev, data as { node: string; output?: unknown }, "completed"));
       pushEvent("node_complete", data);
-    });
+    };
 
-    source.addEventListener("error", (e: Event) => {
+    const onError = (e: Event) => {
       const messageEvent = e as MessageEvent;
       if (messageEvent.data) {
-        const data = JSON.parse(messageEvent.data);
-        setError(data);
-        pushEvent("error", data);
+        const data = safeParse(messageEvent.data);
+        if (data) {
+          setError(data as unknown as AgentError);
+          pushEvent("error", data);
+        }
       } else {
+        source.close();
         setStatus("error");
       }
-    });
+    };
 
-    source.addEventListener("done", (e) => {
-      const data = JSON.parse(e.data);
+    const onDone = (e: MessageEvent) => {
+      const data = safeParse(e.data);
+      if (data) {
+        setResult((data.result as Record<string, unknown>) ?? null);
+        pushEvent("done", data);
+      }
       setStatus("done");
-      setResult(data.result ?? null);
-      pushEvent("done", data);
       source.close();
-    });
-  }, [pushEvent]);
+    };
+
+    source.addEventListener("open", onOpen);
+    source.addEventListener("session_start", onSessionStart);
+    source.addEventListener("node_start", onNodeStart);
+    source.addEventListener("node_complete", onNodeComplete);
+    source.addEventListener("error", onError);
+    source.addEventListener("done", onDone);
+
+    cleanupRef.current = () => {
+      source.removeEventListener("open", onOpen);
+      source.removeEventListener("session_start", onSessionStart);
+      source.removeEventListener("node_start", onNodeStart);
+      source.removeEventListener("node_complete", onNodeComplete);
+      source.removeEventListener("error", onError);
+      source.removeEventListener("done", onDone);
+      source.close();
+    };
+  }, [pushEvent, closeSource]);
 
   useEffect(() => {
     return () => {
-      sourceRef.current?.close();
+      closeSource();
     };
-  }, []);
+  }, [closeSource]);
 
   return { steps, events, error, status, result, connect };
 }
