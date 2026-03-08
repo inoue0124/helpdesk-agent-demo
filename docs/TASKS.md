@@ -5,13 +5,13 @@
 ### 01-shared-infrastructure
 - [x] Docker Compose（ローカル / 本番）
 - [x] Dockerfile (backend / frontend)
-- [ ] Dockerfile (Elasticsearch + kuromoji)
+- [x] Dockerfile (Elasticsearch + kuromoji)
 - [x] Caddyfile, .env.example
-- [ ] 共通 Settings / Logger
-- [ ] 共通 DB (SQLite) + Repository 基盤
-- [ ] 共通 SSE ストリーミングヘルパー（イベントコントラクト準拠）
-- [ ] 共通エラーハンドリング（AppError + 例外ハンドラ + リトライヘルパー）
-- [ ] 共通 API スキーマ
+- [x] 共通 Settings / Logger
+- [x] 共通 DB (SQLite) + Repository 基盤
+- [x] 共通 SSE ストリーミングヘルパー（イベントコントラクト準拠）
+- [x] 共通エラーハンドリング（AppError + 例外ハンドラ + リトライヘルパー）
+- [x] 共通 API スキーマ
 
 ### 02-portal-frontend
 - [ ] Next.js + shadcn/ui + Tailwind CSS セットアップ
