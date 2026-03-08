@@ -31,7 +31,7 @@ export function StreamViewer({ events }: StreamViewerProps) {
             <p className="text-muted-foreground">イベント待機中...</p>
           )}
           {events.map((ev, i) => (
-            <div key={i} className="flex gap-2">
+            <div key={`${ev.timestamp}-${ev.event}-${i}`} className="flex gap-2">
               <span className="text-muted-foreground shrink-0">
                 {new Date(ev.timestamp).toLocaleTimeString("ja-JP")}
               </span>

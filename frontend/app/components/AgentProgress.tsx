@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
 
 export type StepPhase = "pending" | "running" | "completed" | "failed";
@@ -15,7 +16,7 @@ interface AgentProgressProps {
   steps: AgentStep[];
 }
 
-const phaseIcon: Record<StepPhase, React.ReactNode> = {
+const phaseIcon: Record<StepPhase, ReactNode> = {
   pending: <Circle className="h-4 w-4 text-muted-foreground" />,
   running: <Loader2 className="h-4 w-4 text-primary animate-spin" />,
   completed: <CheckCircle2 className="h-4 w-4 text-green-600" />,
