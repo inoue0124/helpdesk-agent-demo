@@ -2,12 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-export interface StreamEvent {
-  event: string;
-  data: Record<string, unknown>;
-  timestamp: string;
-}
+import type { StreamEvent } from "@/app/types/stream";
 
 interface StreamViewerProps {
   events: StreamEvent[];

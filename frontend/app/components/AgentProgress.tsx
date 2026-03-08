@@ -2,15 +2,7 @@
 
 import type { ReactNode } from "react";
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-
-export type StepPhase = "pending" | "running" | "completed" | "failed";
-
-export interface AgentStep {
-  node: string;
-  phase: StepPhase;
-  message?: string;
-  output?: unknown;
-}
+import type { AgentStep, StepPhase } from "@/app/types/stream";
 
 interface AgentProgressProps {
   steps: AgentStep[];
@@ -20,6 +12,7 @@ const phaseIcon: Record<StepPhase, ReactNode> = {
   pending: <Circle className="h-4 w-4 text-muted-foreground" />,
   running: <Loader2 className="h-4 w-4 text-primary animate-spin" />,
   completed: <CheckCircle2 className="h-4 w-4 text-green-600" />,
+  /** バックエンドで node_fail イベントが実装された際に使用する */
   failed: <XCircle className="h-4 w-4 text-destructive" />,
 };
 

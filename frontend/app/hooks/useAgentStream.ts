@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentStep, StepPhase } from "@/app/components/AgentProgress";
-import type { StreamEvent } from "@/app/components/StreamViewer";
-import { API_URL } from "@/app/lib/api";
+import type { AgentStep, StepPhase, StreamEvent } from "@/app/types/stream";
+import { API_URL } from "@/lib/api";
 
 export type StreamStatus = "idle" | "connecting" | "streaming" | "done" | "error";
 
@@ -19,7 +18,6 @@ interface UseAgentStreamReturn {
   events: StreamEvent[];
   error: AgentError | null;
   status: StreamStatus;
-  result: Record<string, unknown> | null;
   connect: (agentType: string, sessionId: string) => void;
 }
 
@@ -44,8 +42,6 @@ export function useAgentStream(): UseAgentStreamReturn {
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [error, setError] = useState<AgentError | null>(null);
   const [status, setStatus] = useState<StreamStatus>("idle");
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
-  const sourceRef = useRef<EventSource | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   const pushEvent = useCallback((event: string, data: Record<string, unknown>) => {
@@ -58,7 +54,6 @@ export function useAgentStream(): UseAgentStreamReturn {
   const closeSource = useCallback(() => {
     cleanupRef.current?.();
     cleanupRef.current = null;
-    sourceRef.current = null;
   }, []);
 
   const connect = useCallback((agentType: string, sessionId: string) => {
@@ -66,13 +61,11 @@ export function useAgentStream(): UseAgentStreamReturn {
     setSteps([]);
     setEvents([]);
     setError(null);
-    setResult(null);
     setStatus("connecting");
 
     const source = new EventSource(
-      `${API_URL}/api/${agentType}/sessions/${sessionId}/stream`
+      `${API_URL}/api/${encodeURIComponent(agentType)}/sessions/${encodeURIComponent(sessionId)}/stream`
     );
-    sourceRef.current = source;
 
     const onOpen = () => setStatus("streaming");
 
@@ -100,6 +93,7 @@ export function useAgentStream(): UseAgentStreamReturn {
         const data = safeParse(e.data);
         if (data) {
           setError(data as unknown as AgentError);
+          setStatus("error");
           pushEvent("error", data);
         }
       } else {
@@ -111,7 +105,6 @@ export function useAgentStream(): UseAgentStreamReturn {
     const onDone = (e: MessageEvent) => {
       const data = safeParse(e.data);
       if (data) {
-        setResult((data.result as Record<string, unknown>) ?? null);
         pushEvent("done", data);
       }
       setStatus("done");
@@ -142,5 +135,5 @@ export function useAgentStream(): UseAgentStreamReturn {
     };
   }, [closeSource]);
 
-  return { steps, events, error, status, result, connect };
+  return { steps, events, error, status, connect };
 }

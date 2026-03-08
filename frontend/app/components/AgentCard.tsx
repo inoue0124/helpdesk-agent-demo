@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 import {
   Card,
   CardHeader,
@@ -8,24 +8,35 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
+export type AccentColor = "blue" | "emerald" | "violet" | "amber";
+
+const accentClasses: Record<AccentColor, string> = {
+  blue: "from-blue-500 to-blue-600",
+  emerald: "from-emerald-500 to-emerald-600",
+  violet: "from-violet-500 to-violet-600",
+  amber: "from-amber-500 to-amber-600",
+};
+
 interface AgentCardProps {
   title: string;
   description: string;
   pattern: string;
   href: string;
-  icon: ReactNode;
-  accent: string;
+  icon: ReactElement;
+  accent: AccentColor;
   features: string[];
 }
 
 export function AgentCard({ title, description, pattern, href, icon, accent, features }: AgentCardProps) {
+  const gradient = accentClasses[accent];
+
   return (
     <Link href={href} className="group">
       <Card className="relative h-full overflow-hidden transition-all duration-300 hover:shadow-lg hover:-translate-y-1 cursor-pointer">
-        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
+        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${gradient}`} />
         <CardHeader className="pt-6 gap-3">
           <div className="flex items-center gap-3">
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${accent} text-white shadow-sm`}>
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${gradient} text-white shadow-sm`}>
               {icon}
             </div>
             <div>

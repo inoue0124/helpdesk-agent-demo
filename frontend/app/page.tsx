@@ -9,7 +9,7 @@ const agents = [
     pattern: "Plan → Reflection → Retry",
     href: "/helpdesk",
     icon: <Headset className="h-5 w-5" />,
-    accent: "from-blue-500 to-blue-600",
+    accent: "blue" as const,
     features: ["ナレッジ検索", "自動回答", "品質評価"],
   },
   {
@@ -19,7 +19,7 @@ const agents = [
     pattern: "Code Gen → Sandbox → Review",
     href: "/data-analysis",
     icon: <BarChart3 className="h-5 w-5" />,
-    accent: "from-emerald-500 to-emerald-600",
+    accent: "emerald" as const,
     features: ["CSV 解析", "コード生成", "可視化"],
   },
   {
@@ -29,7 +29,7 @@ const agents = [
     pattern: "Multi-Agent Collaboration",
     href: "/marketing",
     icon: <Megaphone className="h-5 w-5" />,
-    accent: "from-violet-500 to-violet-600",
+    accent: "violet" as const,
     features: ["市場分析", "施策提案", "競合調査"],
   },
   {
@@ -39,7 +39,7 @@ const agents = [
     pattern: "Multi-Chain + Evaluation",
     href: "/proposal",
     icon: <FileText className="h-5 w-5" />,
-    accent: "from-amber-500 to-amber-600",
+    accent: "amber" as const,
     features: ["情報収集", "構成設計", "資料生成"],
   },
 ];
