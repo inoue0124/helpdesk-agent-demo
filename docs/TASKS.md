@@ -14,11 +14,11 @@
 - [x] 共通 API スキーマ
 
 ### 02-portal-frontend
-- [ ] Next.js + shadcn/ui + Tailwind CSS セットアップ
-- [ ] ポータルページ（エージェント選択）
-- [ ] 共通レイアウト + ナビゲーション
-- [ ] AgentProgress 共通コンポーネント
-- [ ] StreamViewer 共通コンポーネント
+- [x] Next.js + shadcn/ui + Tailwind CSS セットアップ
+- [x] ポータルページ（エージェント選択）
+- [x] 共通レイアウト + ナビゲーション
+- [x] AgentProgress 共通コンポーネント
+- [x] StreamViewer 共通コンポーネント
 
 ---
 

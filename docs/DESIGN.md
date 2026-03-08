@@ -260,35 +260,18 @@ data: {"timestamp": "2026-03-08T12:00:15Z", "session_id": "sess_abc123", "status
 
 ```typescript
 // frontend/app/hooks/useAgentStream.ts
-function useAgentStream(agentType: string, sessionId: string) {
-    const [steps, setSteps] = useState<AgentStep[]>([]);
-    const [error, setError] = useState<AgentError | null>(null);
-    const [status, setStatus] = useState<"connecting" | "streaming" | "done" | "error">("connecting");
-
-    useEffect(() => {
-        const source = new EventSource(
-            `${API_URL}/api/${agentType}/sessions/${sessionId}/stream`
-        );
-        source.onopen = () => setStatus("streaming");
-
-        source.addEventListener("node_start", (e) => {
-            setSteps((prev) => [...prev, { ...JSON.parse(e.data), phase: "running" }]);
-        });
-        source.addEventListener("node_complete", (e) => {
-            setSteps((prev) => updateLastStep(prev, JSON.parse(e.data)));
-        });
-        source.addEventListener("error", (e) => {
-            if (e.data) setError(JSON.parse(e.data));    // サーバー送信のエラーイベント
-            else setStatus("error");                       // 接続エラー
-        });
-        source.addEventListener("done", (e) => {
-            setStatus("done");
-            source.close();
-        });
-        return () => source.close();
-    }, [agentType, sessionId]);
-
-    return { steps, error, status };
+// 命令型 API — セッション作成後に connect() で接続開始
+function useAgentStream(): {
+    steps: AgentStep[];
+    events: StreamEvent[];
+    error: AgentError | null;
+    status: "idle" | "connecting" | "streaming" | "done" | "error";
+    result: Record<string, unknown> | null;
+    connect: (agentType: string, sessionId: string) => void;
+} {
+    // connect(agentType, sessionId) を呼ぶと EventSource を開き
+    // session_start / node_start / node_complete / error / done を受信
+    // アンマウント時・再接続時に自動クリーンアップ
 }
 ```
 
