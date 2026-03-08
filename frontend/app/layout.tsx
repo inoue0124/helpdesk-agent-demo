@@ -19,9 +19,9 @@ export default function RootLayout({
   return (
     <html lang="ja" className={cn("font-sans", geist.variable)}>
       <body className="min-h-screen flex flex-col">
-        <header className="border-b bg-background">
+        <header className="fixed top-0 inset-x-0 z-50 border-b bg-background">
           <div className="container mx-auto flex h-14 items-center px-4">
-            <Link href="/" className="text-lg font-bold">
+            <Link href="/" className="text-lg font-bold text-foreground">
               AI Agent Demo
             </Link>
             <nav className="ml-8 flex gap-4 text-sm text-muted-foreground">
@@ -40,7 +40,7 @@ export default function RootLayout({
             </nav>
           </div>
         </header>
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 pt-14">{children}</main>
       </body>
     </html>
   );
